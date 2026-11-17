@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gym Membership System</title>
+<style>
+:root{--bg:#eef0f2;--card:#fff;--ink:#14213d;--mute:#5b6577;--line:#d5d9e0;--acc:#e4572e;--accink:#fff;--ok:#1b7f4b;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#10141c;--card:#1a202c;--ink:#eef1f6;--mute:#9aa4b6;--line:#2c3547;--acc:#ff7a4d;--accink:#14100e;--ok:#4cc38a;--bad:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:28px 20px 0;max-width:960px;margin:auto}
+h1{margin:0;font-size:clamp(1.8rem,5vw,2.8rem);font-weight:800;letter-spacing:-.03em;font-stretch:condensed}
+nav{display:flex;gap:4px;margin-top:18px;border-bottom:2px solid var(--line)}
+nav button{background:none;border:0;padding:10px 16px;font:inherit;font-weight:600;color:var(--mute);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px}
+nav button[aria-selected=true]{color:var(--ink);border-color:var(--acc)}
+main{max-width:960px;margin:auto;padding:20px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+input,select{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);width:100%}
+.bar input{flex:1;min-width:160px;width:auto}
+button.b{font:inherit;font-weight:600;padding:9px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.p{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px}
+.card h3{margin:0 0 2px;font-size:1.15rem}
+.id{color:var(--mute);font-size:.85rem}
+dl{margin:12px 0;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:.92rem}
+dt{color:var(--mute)}dd{margin:0}
+.tag{display:inline-block;font-size:.78rem;font-weight:700;padding:2px 8px;border-radius:99px;border:1px solid currentColor;float:right}
+.Active{color:var(--ok)}.Expired{color:var(--bad)}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.acts .b{padding:6px 10px;font-size:.88rem}
+.empty{padding:36px 12px;text-align:center;color:var(--mute);border:2px dashed var(--line);border-radius:8px}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(420px,92vw);padding:20px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+dialog h2{margin:0 0 12px;font-size:1.2rem}
+label{display:block;margin-bottom:10px;font-size:.9rem;font-weight:600}
+label input,label select{margin-top:4px;font-weight:400}
+.end{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Gym Membership System</h1>
+  <nav role="tablist">
+    <button role="tab" id="t-members" aria-selected="true">Members</button>
+    <button role="tab" id="t-trainers" aria-selected="false">Trainers</button>
+  </nav>
+</header>
+<main>
+  <section id="members">
+    <div class="bar">
+      <input id="q" type="search" placeholder="Search by member ID or name" aria-label="Search members">
+      <button class="b p" id="addM">Register member</button>
+    </div>
+    <div class="grid" id="mList"></div>
+  </section>
+  <section id="trainers" hidden>
+    <div class="bar">
+      <input id="qt" type="search" placeholder="Search by trainer ID or name" aria-label="Search trainers">
+      <button class="b p" id="addT">Register trainer</button>
+    </div>
+    <div class="grid" id="tList"></div>
+  </section>
+</main>
+<dialog id="dlg"><form method="dialog" id="frm"></form></dialog>
+
+<script>
+const PLANS = {
+  Monthly:   {fee: 1000, months: 1},
+  Quarterly: {fee: 2700, months: 3},
+  Yearly:    {fee: 9600, months: 12}
+};
+const KEY = "gym-membership-system";
+let S = {members: [], trainers: [], nextM: 1001, nextT: 2001};
+try { const r = localStorage.getItem(KEY); if (r) S = JSON.parse(r); } catch (e) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const today = () => new Date().toISOString().slice(0, 10);
+
+function expiry(m) {
+  const d = new Date(m.start + "T00:00:00");
+  d.setMonth(d.getMonth() + PLANS[m.plan].months);
+  return d;
+}
+const fmt = d => d.toISOString ? new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10) : d;
+const status = m => new Date() < expiry(m) ? "Active" : "Expired";
+const trainerOf = m => S.trainers.find(t => t.id === m.trainerId);
+
+function openForm(title, fields, submitText, onSubmit) {
+  const f = $("frm");
+  f.innerHTML = `<h2>${esc(title)}</h2>` + fields.map(x => {
+    const v = x.value ?? "";
+    const input = x.options
+      ? `<select name="${x.name}" required>${x.options.map(o => `<option value="${esc(o.v)}"${o.v == v ? " selected" : ""}>${esc(o.t)}</option>`).join("")}</select>`
+      : `<input name="${x.name}" type="${x.type || "text"}" value="${esc(v)}" ${x.min !== undefined ? `min="${x.min}"` : ""} required>`;
+    return `<label>${esc(x.label)}${input}</label>`;
+  }).join("") + `<div class="end"><button class="b" value="cancel" formnovalidate>Cancel</button><button class="b p" value="ok">${esc(submitText)}</button></div>`;
+  f.onsubmit = e => {
+    if (e.submitter && e.submitter.value === "ok") {
+      onSubmit(Object.fromEntries(new FormData(f)));
+      save(); render();
+    }
+  };
+  $("dlg").showModal();
+}
+
+const planOptions = Object.entries(PLANS).map(([k, p]) => ({v: k, t: `${k} - Rs. ${p.fee}`}));
+const personFields = (d = {}) => [
+  {name: "name", label: "Name", value: d.name},
+  {name: "age", label: "Age", type: "number", min: 1, value: d.age},
+  {name: "phone", label: "Phone", type: "tel", value: d.phone}
+];
+
+function registerMember() {
+  openForm("Register member", [...personFields(), {name: "plan", label: "Plan", options: planOptions}], "Register", d => {
+    S.members.push({id: S.nextM++, name: d.name.trim(), age: +d.age, phone: d.phone.trim(), plan: d.plan, start: today(), trainerId: null});
+  });
+}
+function editMember(id) {
+  const m = S.members.find(x => x.id === id);
+  openForm("Update member", personFields(m), "Save changes", d => {
+    Object.assign(m, {name: d.name.trim(), age: +d.age, phone: d.phone.trim()});
+  });
+}
+function renewMember(id) {
+  const m = S.members.find(x => x.id === id);
+  openForm("Renew membership for " + m.name, [{name: "plan", label: "New plan", options: planOptions, value: m.plan}], "Renew", d => {
+    m.plan = d.plan; m.start = today();
+  });
+}
+function assignTrainer(id) {
+  if (!S.trainers.length) { alert("No trainers available. Register a trainer first."); return; }
+  const m = S.members.find(x => x.id === id);
+  const opts = S.trainers.map(t => ({v: t.id, t: `${t.name} (ID ${t.id}, ${t.spec})`}));
+  openForm("Assign trainer to " + m.name, [{name: "tid", label: "Trainer", options: opts, value: m.trainerId}], "Assign", d => {
+    m.trainerId = +d.tid;
+  });
+}
+function registerTrainer() {
+  openForm("Register trainer", [
+    ...personFields(),
+    {name: "spec", label: "Specialization (e.g. Weight Training, Yoga, Cardio)"},
+    {name: "exp", label: "Years of experience", type: "number", min: 0},
+    {name: "cert", label: "Certification"},
+    {name: "shift", label: "Shift", options: [{v: "Morning", t: "Morning"}, {v: "Evening", t: "Evening"}]}
+  ], "Register", d => {
+    S.trainers.push({id: S.nextT++, name: d.name.trim(), age: +d.age, phone: d.phone.trim(), spec: d.spec.trim(), exp: +d.exp, cert: d.cert.trim(), shift: d.shift, joined: today()});
+  });
+}
+
+const matches = (o, q) => !q || String(o.id).includes(q) || o.name.toLowerCase().includes(q.toLowerCase());
+
+function render() {
+  const mq = $("q").value.trim(), tq = $("qt").value.trim();
+  const ms = S.members.filter(m => matches(m, mq));
+  $("mList").innerHTML = ms.length ? ms.map(m => {
+    const t = trainerOf(m), st = status(m), p = PLANS[m.plan];
+    return `<article class="card">
+      <span class="tag ${st}">${st}</span>
+      <h3>${esc(m.name)}</h3><div class="id">Member ID ${m.id}</div>
+      <dl>
+        <dt>Age</dt><dd>${m.age}</dd>
+        <dt>Phone</dt><dd>${esc(m.phone)}</dd>
+        <dt>Plan</dt><dd>${m.plan} (Rs. ${p.fee})</dd>
+        <dt>Started</dt><dd>${m.start}</dd>
+        <dt>Valid till</dt><dd>${fmt(expiry(m))}</dd>
+        <dt>Trainer</dt><dd>${t ? esc(t.name) + " (ID " + t.id + ", " + esc(t.spec) + ")" : "Not assigned"}</dd>
+      </dl>
+      <div class="acts">
+        <button class="b" onclick="editMember(${m.id})">Edit</button>
+        <button class="b" onclick="renewMember(${m.id})">Renew</button>
+        <button class="b" onclick="assignTrainer(${m.id})">Assign trainer</button>
+      </div></article>`;
+  }).join("") : `<div class="empty" style="grid-column:1/-1">${S.members.length ? "No member matches your search." : "No members registered yet. Use Register member to add the first one."}</div>`;
+
+  const ts = S.trainers.filter(t => matches(t, tq));
+  $("tList").innerHTML = ts.length ? ts.map(t => {
+    const ids = S.members.filter(m => m.trainerId === t.id).map(m => m.id);
+    return `<article class="card">
+      <h3>${esc(t.name)}</h3><div class="id">Trainer ID ${t.id}</div>
+      <dl>
+        <dt>Age</dt><dd>${t.age}</dd>
+        <dt>Phone</dt><dd>${esc(t.phone)}</dd>
+        <dt>Specialization</dt><dd>${esc(t.spec)}</dd>
+        <dt>Experience</dt><dd>${t.exp} year(s)</dd>
+        <dt>Certification</dt><dd>${esc(t.cert)}</dd>
+        <dt>Shift</dt><dd>${t.shift}</dd>
+        <dt>Joined</dt><dd>${t.joined}</dd>
+        <dt>Members</dt><dd>${ids.length}${ids.length ? " (" + ids.join(", ") + ")" : ""}</dd>
+      </dl></article>`;
+  }).join("") : `<div class="empty" style="grid-column:1/-1">${S.trainers.length ? "No trainer matches your search." : "No trainers registered yet. Use Register trainer to add one."}</div>`;
+}
+
+function tab(name) {
+  for (const n of ["members", "trainers"]) {
+    $(n).hidden = n !== name;
+    $("t-" + n).setAttribute("aria-selected", n === name);
+  }
+}
+$("t-members").onclick = () => tab("members");
+$("t-trainers").onclick = () => tab("trainers");
+$("addM").onclick = registerMember;
+$("addT").onclick = registerTrainer;
+$("q").oninput = $("qt").oninput = render;
+render();
+</script>
+</body>
+</html>
